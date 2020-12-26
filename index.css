@@ -1,0 +1,31 @@
+body{
+	align-items     : center;
+	background-color: #373737;
+	box-sizing      : border-box;
+	display         : flex;
+	height          : 100vh;
+	justify-content : center;
+	margin          : 0px;
+	padding         : 1em;
+}
+
+#display{
+	font-family: Roboto, Arial, Helvetica, sans-serif;
+	height     : 90vmin;
+	width      : 90vmin;
+}
+
+#stats{
+	width           : 20em;
+	height          : 90vmin;
+	margin-left     : 1em;
+	box-sizing      : border-box;
+	padding         : 1em;
+	background-color: white;
+	color           : black;
+	font-family     : "Roboto Mono", Arial, Helvetica, sans-serif;
+}
+
+#stats > *{
+	display: block;
+}

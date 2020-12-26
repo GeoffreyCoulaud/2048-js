@@ -3,24 +3,13 @@
 <head>
 	<title>2048</title>
 	<meta charset="utf-8">
+	<script defer type="module" src="./index.mjs"></script>
+	<link href="./index.css" rel="stylesheet" type="text/css">
+	<link rel="preconnect" href="https://fonts.gstatic.com">
+	<link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet"> 
 </head>
 <body>
-	<canvas id="reciever"></canvas>
-	<div id="infos"></div>
-	<script src="s.js"></script>
-	<style type="text/css">
-		body{
-			background-color: #373737;
-			margin: 0px;
-			padding: 1em;
-		}
-		#infos{
-			text-align: right;
-			position: fixed;
-			color: white;
-			right: 1em;
-			top: 5em;
-		}
-	</style>
+	<canvas id="display"></canvas>
+	<div id="stats"></div>
 </body>
 </html>
