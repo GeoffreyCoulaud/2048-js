@@ -16,4 +16,4 @@ Ex : Un joystick, le changement de rotation d'un gyroscope, la décision d'une I
 J'ai peu d'idées d'améliorations de ce projet, il est considéré comme fini.  
 Idées actuelles :
 - Animations de déplacement des cases
-- Classe GameController pour faire abstraction des déclenchements "sauvages" de `tilt`
+- ~~Classe GameController pour faire abstraction des déclenchements "sauvages" de `tilt`~~

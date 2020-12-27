@@ -1,29 +1,6 @@
-class Vector2{
-	constructor(x = 0, y = 0){
-		this.x = x;
-		this.y = y;
-	}
-
-	/**
-	 * Compare le vecteur actuel avec un autre
-	 * @param {Vector2} v Le vecteur à comparer
-	 */
-	static equals = (a, b)=>{
-		return (a.x === b.x && a.y === b.y);
-	}
-}
-
-class Direction extends Vector2{}
-
-class Position extends Vector2{
-	/**
-	 * Créer une position égale à la présente déplacée dans la direction donnée
-	 * @param {Direction} direction 
-	 */
-	add = (direction)=>{
-		return new Position(this.x + direction.x, this.y + direction.y);
-	}
-}
+import { GameStartEvent, GameEndEvent } from "./events.mjs";
+import { Direction, Position } from "./geometry.mjs";
+import { GameController } from "./controllers.mjs";
 
 class Case{
 	constructor(value = 0){
@@ -47,6 +24,9 @@ function getRange(start, stop){
 	return range;
 }
 
+/**
+ * Jeu de 2048
+ */
 export class Game extends EventTarget{
 
 	// Couleurs d'affichage
@@ -56,10 +36,11 @@ export class Game extends EventTarget{
 	]);
 
 	// Paramètres de logique de jeu
-	cases   = [];  // Matrice de cases
-	rows    = 4;   // Nombre de cases par colonne
-	columns = 4;   // Nombre de cases par ligne
-	moves   = 0;
+	cases     = [];     // Matrice de cases
+	rows      = 4;      // Nombre de cases par colonne
+	columns   = 4;      // Nombre de cases par ligne
+	moves     = 0;
+	isOngoing = false;
 	
 	// Paramètres d'affichage
 	canvas     = null;
@@ -70,22 +51,13 @@ export class Game extends EventTarget{
 	gameWidth  = 0;
 	gameHeight = 0;
 	
-	// Directions de déplacements possibles
-	static directions = {
-		up   : new Direction(0, -1),
-		down : new Direction(0,  1),
-		left : new Direction(-1, 0),
-		right: new Direction(1,  0),
-		still: new Direction(0,  0)
-	};
-	
 	/**
-	 * Représente une partie de 2048
-	 * @param {number} columns 
-	 * @param {number} rows 
-	 * @param {HTMLCanvasElement} canvas 
+	 * @param {number} columns            nombre de colonne de jeu
+	 * @param {number} rows               nombre de lignes de jeu
+	 * @param {HTMLCanvasElement} canvas  canvas où est affiché le jeu
+	 * @param {GameController} controller controlleur de jeu
 	 */
-	constructor(columns, rows, canvas){
+	constructor(columns, rows, canvas, controller){
 		super();
 
 		// Initialiser les paramètres
@@ -106,6 +78,13 @@ export class Game extends EventTarget{
 		window.addEventListener("resize", ()=>{
 			this.updateCanvasRenderSize();
 			this.updateCanvasDisplay();
+		});
+
+		// Controlleur de jeu qui déclenche les mouvements
+		controller.addEventListener("tilt", (event)=>{
+			if (this.isOngoing){
+				this.tilt(event.direction);
+			}
 		});
 	}
 
@@ -142,12 +121,14 @@ export class Game extends EventTarget{
 
 	/**
 	 * Initialise le jeu en entier
+	 * @method
+	 * @public
 	 */
 	initializeGame = ()=>{
 		// Initialiser
 		this.moves = 0;
 		this.initializeCases();
-		this.addRandomCase();
+		this._addRandomCase();
 		this.updateCanvasDisplay();
 		// Déclencher l'évenement start
 		this._onStart();
@@ -160,6 +141,8 @@ export class Game extends EventTarget{
 	 * @param {number} orderX 1: gauche -> droite, -1: inverse
 	 * @param {number} orderY 1: haut -> bas, -1: inverse
 	 * @returns {boolean} false si interrompu en cours de boucle, true sinon 
+	 * @public
+	 * @method
 	 */
 	eachCase = (callback, orderX = 1, orderY = 1)=>{
 		// Ordre normal  : 0,   1,   2, ... N
@@ -183,6 +166,8 @@ export class Game extends EventTarget{
 	 * Obtenir la case qui est à une position donnée
 	 * @param {Position} position
 	 * @returns {Case}
+	 * @public
+	 * @method
 	 */
 	getCaseAtPos = (position)=>{
 		let c = this.cases[position.x][position.y];
@@ -193,16 +178,12 @@ export class Game extends EventTarget{
 	 * Obtenir les cases voisines de la position donnée
 	 * @param position 
 	 * @returns {Case[]}
+	 * @public
+	 * @method
 	 */
 	getNeighbours = (position)=>{
 		let neighbours = [];
-		const directions = [
-			Game.directions.up,
-			Game.directions.left,
-			Game.directions.right,
-			Game.directions.down
-		];
-		for (let direction of directions){
+		for (let direction of Direction.cardinals){
 			let neighbourPos = position.add(direction);
 			if (this.isPosInBounds(neighbourPos)){
 				neighbours.push(this.getCaseAtPos(neighbourPos));
@@ -215,6 +196,8 @@ export class Game extends EventTarget{
 	 * Teste si une position est dans la grille de jeu
 	 * @param {Position} position 
 	 * @returns {boolean}
+	 * @public
+	 * @method
 	 */
 	isPosInBounds = (position)=>{
 		return (
@@ -228,6 +211,8 @@ export class Game extends EventTarget{
 	/**
 	 * Obtenir la liste des cases vides
 	 * @returns {Position[]}
+	 * @public
+	 * @method
 	 */
 	getEmptyCases = ()=>{
 		// Donner les cases vides
@@ -243,6 +228,8 @@ export class Game extends EventTarget{
 	/**
 	 * Teste si le jeu est dans un état perdu
 	 * @returns {boolean}
+	 * @public
+	 * @method
 	 */
 	isGameLost = ()=>{
 		// Si les cases ne sont pas toutes pleines, ce n'est pas perdu
@@ -267,8 +254,10 @@ export class Game extends EventTarget{
 	/**
 	 * Ajouter une case "2" dans une position vide
 	 * @returns {boolean} true si réussit, false sinon
+	 * @private
+	 * @method
 	 */
-	addRandomCase = ()=>{
+	_addRandomCase = ()=>{
 		let positions = this.getEmptyCases();
 		if (positions.length === 0){
 			return false;
@@ -284,8 +273,10 @@ export class Game extends EventTarget{
 	 * @param {Position} origin La position de la case au départ
 	 * @param {Direction} direction La direction du déplacement
 	 * @returns {Position} La position après le déplacement
+	 * @private
+	 * @method
 	 */
-	slideCaseOnEmpty = (origin, direction)=>{
+	_slideCaseOnEmpty = (origin, direction)=>{
 		let valueAtOrigin = this.getCaseAtPos(origin).value;
 		let originEqualsDestination = true;
 		// Si à l'origine il y a un vide, on ne le bouge pas.
@@ -317,8 +308,10 @@ export class Game extends EventTarget{
 	 * @param {Position} origin La position de la case au départ
 	 * @param {Direction} direction La direction du déplacement
 	 * @returns {Position} La position après le déplacement
+	 * @private
+	 * @method
 	 */
-	slideCaseOnSame = (origin, direction)=>{
+	_slideCaseOnSame = (origin, direction)=>{
 		let valueAtOrigin = this.getCaseAtPos(origin).value;
 		let originEqualsDestination = true;
 		// Si à l'origine il y a un vide, on ne le bouge pas.
@@ -343,11 +336,12 @@ export class Game extends EventTarget{
 
 	/**
 	 * Glisser les cases du plateau dans un sens
-	 * Ne doit pas être appelée telle quel, utiliser tilt plutôt.
 	 * @param {Direction} direction - Déplacement x et y (norme 1)
 	 * @returns {boolean} false si aucune case n'a bougé, true sinon
+	 * @private
+	 * @method
 	 */
-	slide = (direction)=>{
+	_slide = (direction)=>{
 		let hasChanged = false;
 		this.eachCase(
 			(c,x,y)=>{
@@ -355,8 +349,8 @@ export class Game extends EventTarget{
 				if (!c.value) return;
 				// Effectuer les déplacements
 				let origin = new Position(x,y);
-				let slided = this.slideCaseOnEmpty(origin, direction);
-				let merged = this.slideCaseOnSame(slided, direction);
+				let slided = this._slideCaseOnEmpty(origin, direction);
+				let merged = this._slideCaseOnSame(slided, direction);
 				// Se rappeler si on a bougé
 				if (origin !== merged){ hasChanged = true; }
 			}, 
@@ -369,14 +363,16 @@ export class Game extends EventTarget{
 	/**
 	 * Initier le déplacement des cases du plateau par l'utilisateur
 	 * @param {Direction} direction 
+	 * @public
+	 * @method
 	 */
 	tilt = (direction)=>{
 		// Glisser le plateau
-		let hasMoved = this.slide(direction);
+		let hasMoved = this._slide(direction);
 		if (hasMoved){
 			this.moves++;
 			// Ajouter une case
-			let isCaseAdded = this.addRandomCase();
+			let isCaseAdded = this._addRandomCase();
 			// Afficher le nouvel état
 			this.updateCanvasDisplay();
 			// Déclencher _onLose si on a perdu
@@ -389,6 +385,8 @@ export class Game extends EventTarget{
 	/**
 	 * Donne le score actuel de la partie
 	 * @returns {number} la somme des cases
+	 * @public
+	 * @method
 	 */
 	getScore = ()=>{
 		let sum = 0;
@@ -401,6 +399,8 @@ export class Game extends EventTarget{
 	/**
 	 * Donne la valeur de la case la plus grande
 	 * @returns {number}
+	 * @public
+	 * @method
 	 */
 	getMaxCase = ()=>{
 		let max = 0;
@@ -413,33 +413,9 @@ export class Game extends EventTarget{
 	}
 
 	/**
-	 * A exécuter quand une partie commence
-	 */
-	_onStart = ()=>{
-		// Emettre l'évenement "start"
-		let e = new CustomEvent("start");
-		this.dispatchEvent(e);
-	}
-
-	/**
-	 * A exécuter quand une partie est perdue
-	 */
-	_onLose = ()=>{
-		const score = this.getScore();
-		const max = this.getMaxCase();
-		// Emettre l'évenement "lose"
-		let e = new CustomEvent("lose", {
-			detail: {
-				moves: this.moves,
-				score: score,
-				max: max,
-			}
-		});
-		this.dispatchEvent(e);
-	}
-
-	/**
 	 * Mettre à jour la dimension d'affichage du canvas
+	 * @public
+	 * @method
 	 */
 	updateCanvasRenderSize = ()=>{
 		console.log("Mise à jour de la taille du canvas");
@@ -454,6 +430,8 @@ export class Game extends EventTarget{
 
 	/**
 	 * Afficher dans le canvas l'état actuel du jeu
+	 * @public
+	 * @method
 	 */
 	updateCanvasDisplay = ()=>{
 		// Police d'écriture
@@ -494,6 +472,38 @@ export class Game extends EventTarget{
 				}
 			}
 		);
+	}
+
+	/**
+	 * Raccourci pour la méthode addEventListener
+	 * @param eventName Nom de l'évènement à écouter
+	 * @param callback  Fonction à exécuter 
+	 */
+	on = (eventName, callback)=>{
+		this.addEventListener(eventName, callback);
+	}
+
+	/**
+	 * A exécuter quand une partie commence
+	 * @private
+	 * @method
+	 */
+	_onStart = ()=>{
+		this.isOngoing = true;
+		this.dispatchEvent(new GameStartEvent());
+	}
+
+	/**
+	 * A exécuter quand une partie est perdue
+	 * @private
+	 * @method
+	 */
+	_onLose = ()=>{
+		this.isOngoing = false;
+		const score = this.getScore();
+		const max   = this.getMaxCase();
+		const moves = this.moves;
+		this.dispatchEvent(new GameEndEvent(score, max, moves));
 	}
 
 }
