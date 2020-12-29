@@ -1,0 +1,29 @@
+{
+  "name": "2048",
+  "version": "1.0.0",
+  "description": "A 2048 js game",
+  "main": "index.mjs",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "esbuild index.mjs --bundle --minify --outfile=dist/bundle.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GeoffreyCoulaud/2048-js.git"
+  },
+  "keywords": [
+    "2048",
+    "game",
+    "fiddle",
+    "javascript"
+  ],
+  "author": "geoffreycoulaud <geoffrey.coulaud@gmail.com> (https://geoffrey-coulaud.fr)",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/GeoffreyCoulaud/2048-js/issues"
+  },
+  "homepage": "https://github.com/GeoffreyCoulaud/2048-js#readme",
+  "devDependencies": {
+    "esbuild": "^0.8.26"
+  }
+}

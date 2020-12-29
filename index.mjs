@@ -12,7 +12,7 @@ const infos   = new GameInfos(infosEl);
 
 // Créer le jeu
 const canvas   = document.getElementById("display");
-const gameSize = [3,3];
+const gameSize = [5,5];
 const game     = new Game(...gameSize, canvas, ctrl);
 
 // Ecouter le démarrage de jeu
