@@ -11,6 +11,10 @@ export class Vector2{
 		this.y = y;
 	}
 
+	toString = ()=>{
+		return `${this.x},${this.y}`;
+	}
+
 	/**
 	 * Compare le vecteur actuel avec un autre
 	 * @param {Vector2} v Le vecteur à comparer
@@ -38,6 +42,18 @@ export class Direction extends Vector2{
  * Position 2D
  */
 export class Position extends Vector2{
+	/**
+	 * Obtenir la distance entre deux positions
+	 * @param {Position} a 
+	 * @param {Position} b 
+	 */
+	static distance = (a,b)=>{
+		return Math.sqrt(
+			Math.pow(a.x - b.x, 2) +
+			Math.pow(a.y - b.y, 2)
+		);
+	}
+	
 	/**
 	 * Créer une position égale à la présente déplacée dans la direction donnée
 	 * @param {Direction} direction 

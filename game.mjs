@@ -1,12 +1,9 @@
-import { GameStartEvent, GameEndEvent } from "./events.mjs";
+import { GameStartEvent, GameEndEvent, AfterTiltEvent } from "./events.mjs";
+import { AnimationStep, AnimatedProperty } from "./animations.mjs";
 import { Direction, Position } from "./geometry.mjs";
 import { GameController } from "./controllers.mjs";
 
-class Case{
-	constructor(value = 0){
-		this.value = value;
-	}
-}
+const SECOND = 1000;
 
 /**
  * Créer une range de pas 1 ou -1
@@ -22,6 +19,16 @@ function getRange(start, stop){
 		range.push(start+i);
 	}
 	return range;
+}
+
+class Case{
+	animations = {
+		position: null,
+		scale: null,
+	};
+	constructor(value = 0){
+		this.value = value;
+	}
 }
 
 /**
@@ -43,13 +50,15 @@ export class Game extends EventTarget{
 	isOngoing = false;
 	
 	// Paramètres d'affichage
-	canvas     = null;
-	ctx        = null;
-	borderSize = 5;
-	caseWidth  = 0;
-	caseHeight = 0;
-	gameWidth  = 0;
-	gameHeight = 0;
+	lastDirection     = Direction.still;
+	canvas            = null;
+	ctx               = null;
+	borderSize        = 5;
+	caseWidth         = 0;
+	caseHeight        = 0;
+	gameWidth         = 0;
+	gameHeight        = 0;
+	animationDuration = 0.1 * SECOND;
 	
 	/**
 	 * @param {number} columns            nombre de colonne de jeu
@@ -74,10 +83,10 @@ export class Game extends EventTarget{
 		this.initializeColors(20);
 
 		// Canvas redimensionné et redessiné avec la fenêtre
-		this.updateCanvasRenderSize();
+		this._updateCanvasRenderSize();
 		window.addEventListener("resize", ()=>{
-			this.updateCanvasRenderSize();
-			this.updateCanvasDisplay();
+			this._updateCanvasRenderSize();
+			this._updateCanvasDisplay();
 		});
 
 		// Controlleur de jeu qui déclenche les mouvements
@@ -129,7 +138,7 @@ export class Game extends EventTarget{
 		this.moves = 0;
 		this.initializeCases();
 		this._addRandomCase();
-		this.updateCanvasDisplay();
+		this._updateCanvasDisplay();
 		// Déclencher l'évenement start
 		this._onStart();
 	}
@@ -253,84 +262,77 @@ export class Game extends EventTarget{
 
 	/**
 	 * Ajouter une case "2" dans une position vide
-	 * @returns {boolean} true si réussit, false sinon
+	 * @returns {null|Position} null si échoue, la position d'ajout sinon
 	 * @private
 	 * @method
 	 */
 	_addRandomCase = ()=>{
+		// Obtenir les positions possibles
 		let positions = this.getEmptyCases();
 		if (positions.length === 0){
-			return false;
+			return null;
 		}
+		// Choisir une position 
 		let posIndex = Math.round(Math.random() * (positions.length-1));
 		let pos = positions[posIndex];
+		// Appliquer la valeur et une animation de grossissement
 		this.getCaseAtPos(pos).value = 2;
-		return true;
+		this.getCaseAtPos(pos).animations.scale = new AnimatedProperty(
+			new AnimationStep(0, Date.now()),
+			new AnimationStep(1, Date.now() + this.animationDuration)
+		);
+		return pos;
 	}
 
 	/**
-	 * Déplace une case sur le plateau sans fusionner 
+	 * Obtenir la nouvelle place d'une une case sur le plateau quand
+	 * on l'a faite glisser dans une direction autant que possible 
+	 * sans fusionner.
 	 * @param {Position} origin La position de la case au départ
 	 * @param {Direction} direction La direction du déplacement
 	 * @returns {Position} La position après le déplacement
 	 * @private
 	 * @method
 	 */
-	_slideCaseOnEmpty = (origin, direction)=>{
+	_getPosSlideEmpty = (origin, direction)=>{
 		let valueAtOrigin = this.getCaseAtPos(origin).value;
-		let originEqualsDestination = true;
-		// Si à l'origine il y a un vide, on ne le bouge pas.
-		if (valueAtOrigin === 0){ return origin; }
 		// On bouge le plus possible la case dans la direction
 		// tant que l'on est sur du vide.
 		let destination = origin;
-		let next        = origin.add(direction);
+		let next = origin.add(direction);
 		while (
 			this.isPosInBounds(next) && 
 			this.getCaseAtPos(next).value === 0
 		){
 			// Validation du déplacement
-			originEqualsDestination = false; 
 			destination = next;
 			// Nouveau déplacement
 			next = next.add(direction);
 		}
-		// Appliquer le déplacement
-		if (!originEqualsDestination){
-			this.getCaseAtPos(destination).value = valueAtOrigin;
-			this.getCaseAtPos(origin).value = 0;
-		}
+		// Retourner la destination
 		return destination;
 	}
 
 	/**
-	 * Glisse une case sur le plateau pour la fusionner 
+	 * Obtenir la nouvelle place d'une une case sur le plateau quand
+	 * on l'a faite glisser dans une direction pour fusionner 
 	 * @param {Position} origin La position de la case au départ
 	 * @param {Direction} direction La direction du déplacement
 	 * @returns {Position} La position après le déplacement
 	 * @private
 	 * @method
 	 */
-	_slideCaseOnSame = (origin, direction)=>{
-		let valueAtOrigin = this.getCaseAtPos(origin).value;
-		let originEqualsDestination = true;
-		// Si à l'origine il y a un vide, on ne le bouge pas.
-		if (valueAtOrigin === 0){ return origin;}
+	_getPosSlideMerge = (origin, value, direction)=>{
 		// On bouge dans la direction si on peut fusionner
-		let destination   = origin;
-		let next          = origin.add(direction);
+		let destination = origin;
+		let next = origin.add(direction);
 		if (
 			this.isPosInBounds(next) &&
-			this.getCaseAtPos(next).value === valueAtOrigin 
+			this.getCaseAtPos(next).value === value 
 		){
-			originEqualsDestination = false;
 			destination = next;
 		}
-		// Appliquer le déplacement
-		if (!originEqualsDestination){
-			this.getCaseAtPos(destination).value = valueAtOrigin * 2;
-			this.getCaseAtPos(origin).value = 0;
-		}
+		// Retourner la destination
 		return destination;
 	}
 
@@ -342,22 +344,34 @@ export class Game extends EventTarget{
 	 * @method
 	 */
 	_slide = (direction)=>{
-		let hasChanged = false;
-		this.eachCase(
-			(c,x,y)=>{
-				// Si la case est vide, on l'ignore
-				if (!c.value) return;
-				// Effectuer les déplacements
-				let origin = new Position(x,y);
-				let slided = this._slideCaseOnEmpty(origin, direction);
-				let merged = this._slideCaseOnSame(slided, direction);
-				// Se rappeler si on a bougé
-				if (origin !== merged){ hasChanged = true; }
-			}, 
-			-direction.x, 
-			-direction.y
-		);
-		return hasChanged;
+		let gameStateChanged = false;
+		this.eachCase((c,x,y)=>{
+			// Si la case est vide, on l'ignore
+			if (!c.value) return;
+			// Obtenir la nouvelle position après glissement
+			let origin = new Position(x,y);
+			let slided = this._getPosSlideEmpty(origin, direction);
+			let merged = this._getPosSlideMerge(slided, c.value, direction);
+			// Détecter le type de changement
+			let hasChanged = origin !== merged;
+			let hasMerged = slided !== merged;
+			gameStateChanged ||= hasChanged;
+			// Appliquer le déplacement
+			if (hasChanged){
+				// Déplacer la case dans la matrice de jeu
+				let newValue = hasMerged ? c.value*2 : c.value;
+				this.getCaseAtPos(origin).value = 0;
+				this.getCaseAtPos(merged).value = newValue;
+				// Appliquer l'animation de position à la case
+				const st = Date.now();
+				const et = st + this.animationDuration;
+				this.getCaseAtPos(merged).animations.position = new AnimatedProperty(
+					new AnimationStep(origin, st),
+					new AnimationStep(merged, et),
+				);
+			}
+		}, -direction.x, -direction.y);
+		return gameStateChanged;
 	}
 
 	/**
@@ -368,13 +382,15 @@ export class Game extends EventTarget{
 	 */
 	tilt = (direction)=>{
 		// Glisser le plateau
-		let hasMoved = this._slide(direction);
-		if (hasMoved){
-			this.moves++;
+		const hasChanged = this._slide(direction);
+		// Réagir au glissement
+		this.lastDirection = direction;
+		this.moves++;
+		this.dispatchEvent(new AfterTiltEvent(hasChanged));
+		// Actions dans le cas où le glissement a fait changer le plateau
+		if (hasChanged){
 			// Ajouter une case
-			let isCaseAdded = this._addRandomCase();
-			// Afficher le nouvel état
-			this.updateCanvasDisplay();
+			this._addRandomCase();
 			// Déclencher _onLose si on a perdu
 			if (this.isGameLost()){
 				this._onLose();
@@ -414,10 +430,10 @@ export class Game extends EventTarget{
 
 	/**
 	 * Mettre à jour la dimension d'affichage du canvas
-	 * @public
+	 * @private
 	 * @method
 	 */
-	updateCanvasRenderSize = ()=>{
+	_updateCanvasRenderSize = ()=>{
 		console.log("Mise à jour de la taille du canvas");
 		const rect      = this.canvas.getBoundingClientRect();
 		this.gameWidth  = rect.width;
@@ -430,54 +446,99 @@ export class Game extends EventTarget{
 
 	/**
 	 * Afficher dans le canvas l'état actuel du jeu
-	 * @public
+	 * @private
 	 * @method
 	 */
-	updateCanvasDisplay = ()=>{
+	_updateCanvasDisplay = ()=>{
 		// Police d'écriture
 		this.ctx.textAlign    = "center";
 		this.ctx.textBaseline = "middle"
 		this.ctx.font         = `bold 30px \"Roboto Mono\"`;
+		
 		// Fond de l'affichage
 		this.ctx.fillStyle = "#ffffff";
 		this.ctx.fillRect(0, 0, this.gameWidth, this.gameHeight);
+		
 		// Affichage des cases
-		this.eachCase(
-			(c, x, y)=>{
-				// Fond de case
-				this.ctx.fillStyle = this.caseColors.get(c.value); 
+		this.eachCase((c, gx, gy)=>{
+			
+			// Obtenir la position de grille et la position animée
+			const gamePos = new Position(gx, gy);
+			let dispPos = gamePos;
+			if (c.animations.position !== null){
+				dispPos = c.animations.position.currentValue; 
+			}
+			
+			// Obtenir la taille de case animée
+			let scale = 1;
+			if (c.animations.scale !== null){
+				scale = c.animations.scale.currentValue;
+			}
+			const scaledWidth = scale * this.caseWidth;
+			const scaledHeight = scale * this.caseHeight;
+			const smx = (this.caseWidth - scaledWidth) / 2;
+			const smy = (this.caseHeight - scaledHeight) / 2;
+			
+			// Fond gris de la case (fixe)
+			if (c.animations.scale || c.animations.position){
+				this.ctx.fillStyle = this.caseColors.get(0); 
 				this.ctx.fillRect(
-					x * this.caseWidth, 
-					y * this.caseHeight, 
+					gamePos.x * this.caseWidth, 
+					gamePos.y * this.caseHeight, 
 					this.caseWidth, 
 					this.caseHeight
 				);
-				// Bordure de case
-				this.ctx.strokeStyle = this.borderColor;
-				this.ctx.lineWidth   = this.borderSize;
-				this.ctx.strokeRect(
-					x * this.caseWidth + 0.5 * this.borderSize, 
-					y * this.caseHeight + 0.5 * this.borderSize, 
-					this.caseWidth - this.borderSize, 
-					this.caseHeight - this.borderSize
-				);
-				// Texte de case
-				this.ctx.fillStyle = '#000000';
-				if (c.value){
-					this.ctx.fillText(
-						c.value, 
-						(x + 0.5) * this.caseWidth, 
-						(y + 0.5) * this.caseHeight
-					);
-				}
 			}
-		);
+			
+			// Fond coloré de case
+			this.ctx.fillStyle = this.caseColors.get(c.value); 
+			this.ctx.fillRect(
+				dispPos.x * this.caseWidth + smx,
+				dispPos.y * this.caseWidth + smy, 
+				scaledWidth, 
+				scaledWidth
+			);
+			
+			// Bordure de case
+			this.ctx.strokeStyle = this.borderColor;
+			this.ctx.lineWidth   = this.borderSize;
+			this.ctx.strokeRect(
+				dispPos.x * this.caseWidth + smx + 0.5 * this.borderSize, 
+				dispPos.y * this.caseHeight + smy + 0.5 * this.borderSize, 
+				Math.max(0, scaledWidth - this.borderSize), 
+				Math.max(0, scaledHeight - this.borderSize)
+			);
+			
+			// Texte de case
+			this.ctx.fillStyle = '#000000';
+			if (c.value){
+				this.ctx.fillText(
+					c.value, 
+					(dispPos.x + 0.5) * this.caseWidth, 
+					(dispPos.y + 0.5) * this.caseHeight
+				);
+			}
+		}, this.lastDirection.x, this.lastDirection.y);
+	}
+
+	/**
+	 * Boucle d'affichage chaque image tant que le jeu est en cours.
+	 * @public
+	 * @method
+	 */
+	displayLoop = ()=>{
+		this._updateCanvasDisplay();
+		if (this.isOngoing){
+			window.requestAnimationFrame(this.displayLoop);
+		}
 	}
 
 	/**
 	 * Raccourci pour la méthode addEventListener
 	 * @param eventName Nom de l'évènement à écouter
-	 * @param callback  Fonction à exécuter 
+	 * @param callback  Fonction à exécuter
+	 * @public
+	 * @method 
 	 */
 	on = (eventName, callback)=>{
 		this.addEventListener(eventName, callback);
@@ -490,6 +551,7 @@ export class Game extends EventTarget{
 	 */
 	_onStart = ()=>{
 		this.isOngoing = true;
+		this.displayLoop();
 		this.dispatchEvent(new GameStartEvent());
 	}
 

@@ -38,3 +38,16 @@ export class TiltEvent extends Event{
 		this.direction = direction;
 	}
 }
+
+/**
+ * Evènement AfterTiltEvent
+ */
+export class AfterTiltEvent extends Event{
+	/**
+	 * @param {boolean} hasChanged true si le plateau a changé, false sinon
+	 */
+	constructor(hasChanged = false){
+		super("aftertilt");
+		this.hasChanged = hasChanged;
+	}
+}
