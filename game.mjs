@@ -26,6 +26,17 @@ class Case{
 		position: null,
 		scale: null,
 	};
+
+	get hasFinishedAnimations(){
+		for (let name in this.animations){
+			if (this.animations[name] === null){ 
+				continue; 
+			} else if (this.animations[name].progression < 1) {
+				return false;
+			}
+		}
+	}
+	
 	constructor(value = 0){
 		this.value = value;
 	}
@@ -43,11 +54,12 @@ export class Game extends EventTarget{
 	]);
 
 	// Paramètres de logique de jeu
+	isOngoing = false;
+	isPaused  = false;
 	cases     = [];     // Matrice de cases
 	rows      = 4;      // Nombre de cases par colonne
 	columns   = 4;      // Nombre de cases par ligne
 	moves     = 0;
-	isOngoing = false;
 	
 	// Paramètres d'affichage
 	lastDirection     = Direction.still;
@@ -56,10 +68,63 @@ export class Game extends EventTarget{
 	borderSize        = 5;
 	caseWidth         = 0;
 	caseHeight        = 0;
-	gameWidth         = 0;
-	gameHeight        = 0;
 	animationDuration = 0.1 * SECOND;
-	
+
+	// -------------------------------------------------------------------------
+	// getters
+
+	get hasFinishedAnimations(){
+		return this.eachCase((c)=>{
+			return c.hasFinishedAnimations;
+		})
+	}
+	get score(){
+		let sum = 0;
+		this.eachCase((c)=>{ sum += c.value; });
+		return sum;
+	}
+	get maxCase(){
+		let max = 0;
+		this.eachCase((c)=>{
+			if (c.value > max){
+				max = c.value;
+			}
+		});
+		return max;
+	}
+	get isInLosingState(){
+		// Si les cases ne sont pas toutes pleines, ce n'est pas perdu
+		if (this.emptyCases.length > 0){ 
+			return false; 
+		}
+		// Si au moins une fusion est possible, ce n'est pas perdu
+		let foundFusion = false;
+		this.eachCase((c, pos)=>{
+			let values = this.getNeighbours(pos).map(el => el.value);
+			if (values.includes(c.value)){
+				foundFusion = true;
+				return false; 
+			}
+		});
+		if (foundFusion){ 
+			return false; 
+		}
+		// Sinon c'est perdu
+		return true;
+	}
+	get emptyCases(){
+		let empty = [];
+		this.eachCase((c, pos)=>{
+			if (c.value === 0){
+				empty.push(pos);
+			}
+		});
+		return empty;
+	}
+
+	// -------------------------------------------------------------------------
+	// Constructor
+
 	/**
 	 * @param {number} columns            nombre de colonne de jeu
 	 * @param {number} rows               nombre de lignes de jeu
@@ -74,74 +139,38 @@ export class Game extends EventTarget{
 		this.columns = columns;
 		
 		// Initialiser le canvas
-		this.canvas        = canvas;
-		this.canvas.height = this.gameWidth;
-		this.canvas.width  = this.gameHeight;
-		this.ctx           = this.canvas.getContext("2d");
+		this.canvas = canvas;
+		this.ctx    = this.canvas.getContext("2d");
 		
 		// Initialiser les couleurs
-		this.initializeColors(20);
+		this._initializeColors(20);
 
 		// Canvas redimensionné et redessiné avec la fenêtre
-		this._updateCanvasRenderSize();
 		window.addEventListener("resize", ()=>{
 			this._updateCanvasRenderSize();
+			this._updateCaseSize();
 			this._updateCanvasDisplay();
 		});
 
-		// Controlleur de jeu qui déclenche les mouvements
+		// Controlleur de jeu qui déclenche les mouvements,
+		// la mise en pause et le reset de partie (restart) 
 		controller.addEventListener("tilt", (event)=>{
-			if (this.isOngoing){
+			if (this.isOngoing && !this.isPaused){
 				this.tilt(event.direction);
 			}
 		});
+		controller.addEventListener("pause", ()=>{
+			console.log(this.isPaused);
+			this.isPaused = !this.isPaused;
+		})
+		controller.addEventListener("restart", ()=>{
+			this._onEnd();
+			this.start();
+		});
 	}
 
-	/**
-	 * Générer les couleurs du jeu
-	 * @param {number} steps Le nombre de couleurs à générer
-	 */
-	initializeColors = (steps = 10)=>{
-		let maxHue = 360;
-		let stepSize = maxHue / steps;
-		for (let i=0; i<steps; i++){
-			let angle = i * stepSize;
-			let power = Math.pow(2, i+1);
-			let color = `hsl(${angle}, 80%, 50%)`;
-			this.caseColors.set(power, color);
-		}
-	}
-
-	/**
-	 * Initialise les cases de la grille de jeu
-	 */
-	initializeCases = ()=>{
-		// Initialiser les cases
-		this.cases.length = 0;
-		for (let x=0; x<this.rows; x++){
-			// Initialiser les lignes
-			this.cases.push( new Array() );
-			// Initialiser les colonnes
-			for (let y=0; y<this.rows; y++){
-				this.cases[x].push( new Case() );
-			}
-		}
-	}
-
-	/**
-	 * Initialise le jeu en entier
-	 * @method
-	 * @public
-	 */
-	initializeGame = ()=>{
-		// Initialiser
-		this.moves = 0;
-		this.initializeCases();
-		this._addRandomCase();
-		this._updateCanvasDisplay();
-		// Déclencher l'évenement start
-		this._onStart();
-	}
+	// -------------------------------------------------------------------------
+	// General
 
 	/**
 	 * Appelle le callback sur chaque case. 
@@ -162,8 +191,8 @@ export class Game extends EventTarget{
 		if (orderY < 0){ys.reverse();}
 		for (let x of xs){
 			for (let y of ys){
-				let callbackReturn = callback(this.cases[x][y], x, y);
-				if (callbackReturn === false){
+				let cr = callback(this.cases[x][y], new Position(x, y));
+				if (cr === false){
 					return false;
 				}
 			}
@@ -178,9 +207,8 @@ export class Game extends EventTarget{
 	 * @public
 	 * @method
 	 */
-	getCaseAtPos = (position)=>{
-		let c = this.cases[position.x][position.y];
-		return c;
+	caseFromPosition = (position)=>{ 
+		return this.cases[position.x][position.y];
 	}
 
 	/**
@@ -192,10 +220,11 @@ export class Game extends EventTarget{
 	 */
 	getNeighbours = (position)=>{
 		let neighbours = [];
-		for (let direction of Direction.cardinals){
+		for (let name of Direction.cardinals){
+			let direction = Direction[name];
 			let neighbourPos = position.add(direction);
 			if (this.isPosInBounds(neighbourPos)){
-				neighbours.push(this.getCaseAtPos(neighbourPos));
+				neighbours.push(this.caseFromPosition(neighbourPos));
 			}
 		}
 		return neighbours;
@@ -217,48 +246,62 @@ export class Game extends EventTarget{
 		);
 	}
 
+	// -------------------------------------------------------------------------
+	// Initialisation
+
 	/**
-	 * Obtenir la liste des cases vides
-	 * @returns {Position[]}
-	 * @public
-	 * @method
+	 * Générer les couleurs du jeu
+	 * @param {number} steps Le nombre de couleurs à générer
 	 */
-	getEmptyCases = ()=>{
-		// Donner les cases vides
-		let empty = [];
-		this.eachCase((c, x, y)=>{
-			if (c.value === 0){
-				empty.push(new Position(x, y));
-			}
-		});
-		return empty;
+	_initializeColors = (steps = 10)=>{
+		let maxHue = 360;
+		let stepSize = maxHue / steps;
+		for (let i=0; i<steps; i++){
+			let angle = i * stepSize;
+			let power = Math.pow(2, i+1);
+			let color = `hsl(${angle}, 80%, 50%)`;
+			this.caseColors.set(power, color);
+		}
 	}
 
 	/**
-	 * Teste si le jeu est dans un état perdu
-	 * @returns {boolean}
-	 * @public
-	 * @method
+	 * Initialise les cases de la grille de jeu
 	 */
-	isGameLost = ()=>{
-		// Si les cases ne sont pas toutes pleines, ce n'est pas perdu
-		if (this.getEmptyCases().length > 0){ 
-			return false; 
+	_initializeCases = ()=>{
+		// Initialiser les cases
+		this.cases.length = 0;
+		for (let x=0; x<this.rows; x++){
+			// Initialiser les lignes
+			this.cases.push( new Array() );
+			// Initialiser les colonnes
+			for (let y=0; y<this.rows; y++){
+				this.cases[x].push( new Case() );
+			}
 		}
-		// Si au moins une fusion est possible, ce n'est pas perdu
-		let fusionPossible = !this.eachCase((c,x,y)=>{
-			// Sortir de la boucle si une fusion est trouvée
-			let neighbours = this.getNeighbours(new Position(x,y));
-			let neighboursValue = neighbours.map(el => el.value);
-			let found = neighboursValue.includes(c.value);
-			if (found){ return false; }
-		});
-		if (fusionPossible){ 
-			return false; 
-		}
-		// Sinon c'est perdu
-		return true;
 	}
+
+	/**
+	 * Initialise le jeu en entier
+	 * @method
+	 * @public
+	 */
+	start = ()=>{
+		// Initialize
+		this.moves     = 0;
+		this.isOngoing = true;
+		this.isPaused  = false;
+		this._initializeCases();
+		this._updateCanvasRenderSize();
+		this._updateCaseSize();
+		this._updateCanvasDisplay();
+		// Start
+		this._addRandomCase();
+		this._displayLoop();
+		this.dispatchEvent(new GameStartEvent());
+	}
+
+	// -------------------------------------------------------------------------
+	// Game logic
 
 	/**
 	 * Ajouter une case "2" dans une position vide
@@ -268,7 +311,7 @@ export class Game extends EventTarget{
 	 */
 	_addRandomCase = ()=>{
 		// Obtenir les positions possibles
-		let positions = this.getEmptyCases();
+		let positions = this.emptyCases;
 		if (positions.length === 0){
 			return null;
 		}
@@ -276,8 +319,8 @@ export class Game extends EventTarget{
 		let posIndex = Math.round(Math.random() * (positions.length-1));
 		let pos = positions[posIndex];
 		// Appliquer la valeur et une animation de grossissement
-		this.getCaseAtPos(pos).value = 2;
-		this.getCaseAtPos(pos).animations.scale = new AnimatedProperty(
+		this.caseFromPosition(pos).value = 2;
+		this.caseFromPosition(pos).animations.scale = new AnimatedProperty(
 			new AnimationStep(0, Date.now()),
 			new AnimationStep(1, Date.now() + this.animationDuration)
 		);
@@ -295,14 +338,14 @@ export class Game extends EventTarget{
 	 * @method
 	 */
 	_getPosSlideEmpty = (origin, direction)=>{
-		let valueAtOrigin = this.getCaseAtPos(origin).value;
+		let valueAtOrigin = this.caseFromPosition(origin).value;
 		// On bouge le plus possible la case dans la direction
 		// tant que l'on est sur du vide.
 		let destination = origin;
 		let next = origin.add(direction);
 		while (
 			this.isPosInBounds(next) && 
-			this.getCaseAtPos(next).value === 0
+			this.caseFromPosition(next).value === 0
 		){
 			// Validation du déplacement
 			destination = next;
@@ -328,7 +371,7 @@ export class Game extends EventTarget{
 		let next = origin.add(direction);
 		if (
 			this.isPosInBounds(next) &&
-			this.getCaseAtPos(next).value === value 
+			this.caseFromPosition(next).value === value 
 		){
 			destination = next;
 		}
@@ -345,31 +388,29 @@ export class Game extends EventTarget{
 	 */
 	_slide = (direction)=>{
 		let gameStateChanged = false;
-		this.eachCase((c,x,y)=>{
+		this.eachCase((c,origin)=>{
 			// Si la case est vide, on l'ignore
-			if (!c.value) return;
+			if (!c.value) { return; }
 			// Obtenir la nouvelle position après glissement
-			let origin = new Position(x,y);
 			let slided = this._getPosSlideEmpty(origin, direction);
 			let merged = this._getPosSlideMerge(slided, c.value, direction);
 			// Détecter le type de changement
 			let hasChanged = origin !== merged;
 			let hasMerged = slided !== merged;
 			gameStateChanged ||= hasChanged;
-			// Appliquer le déplacement
-			if (hasChanged){
-				// Déplacer la case dans la matrice de jeu
-				let newValue = hasMerged ? c.value*2 : c.value;
-				this.getCaseAtPos(origin).value = 0;
-				this.getCaseAtPos(merged).value = newValue;
-				// Appliquer l'animation de position à la case
-				const st = Date.now();
-				const et = st + this.animationDuration;
-				this.getCaseAtPos(merged).animations.position = new AnimatedProperty(
+			if (!hasChanged){ return; }
+			// Déplacer la case dans la matrice de jeu
+			let newValue = hasMerged ? c.value*2 : c.value;
+			this.caseFromPosition(origin).value = 0;
+			this.caseFromPosition(merged).value = newValue;
+			// Appliquer l'animation de position à la case
+			const st = Date.now();
+			const et = st + this.animationDuration;
+			this.caseFromPosition(merged).animations.position = 
+				new AnimatedProperty(
 					new AnimationStep(origin, st),
 					new AnimationStep(merged, et),
 				);
-			}
 		}, -direction.x, -direction.y);
 		return gameStateChanged;
 	}
@@ -392,78 +433,56 @@ export class Game extends EventTarget{
 			// Ajouter une case
 			this._addRandomCase();
 			// Déclencher _onLose si on a perdu
-			if (this.isGameLost()){
-				this._onLose();
+			if (this.isInLosingState){
+				this._onEnd();
 			}
 		}
 	}
 
-	/**
-	 * Donne le score actuel de la partie
-	 * @returns {number} la somme des cases
-	 * @public
-	 * @method
-	 */
-	getScore = ()=>{
-		let sum = 0;
-		this.eachCase((c)=>{
-			sum += c.value;
-		});
-		return sum;
-	}
+	// -------------------------------------------------------------------------
+	// Display
 
-	/**
-	 * Donne la valeur de la case la plus grande
-	 * @returns {number}
-	 * @public
-	 * @method
-	 */
-	getMaxCase = ()=>{
-		let max = 0;
-		this.eachCase((c)=>{
-			if (c.value > max){
-				max = c.value;
-			}
-		});
-		return max;
-	}
-
+	
 	/**
 	 * Mettre à jour la dimension d'affichage du canvas
 	 * @private
 	 * @method
 	 */
-	_updateCanvasRenderSize = ()=>{
-		console.log("Mise à jour de la taille du canvas");
-		const rect      = this.canvas.getBoundingClientRect();
-		this.gameWidth  = rect.width;
-		this.gameHeight = rect.height;
-		this.caseWidth  = this.gameWidth / this.columns;
-		this.caseHeight = this.gameHeight / this.rows;
-		this.canvas.width = this.gameWidth;
-		this.canvas.height = this.gameHeight;
+	_updateCanvasRenderSize = ()=>{		
+		let rect = this.canvas.getBoundingClientRect();
+		this.canvas.width = rect.width;
+		this.canvas.height = rect.height;
 	}
-
+	
+	/**
+	 * Mettre à jour la dimension des cases
+	 * @private
+	 * @method
+	 */
+	_updateCaseSize = ()=>{
+		this.caseWidth  = this.canvas.width / this.columns;
+		this.caseHeight = this.canvas.height / this.rows;
+	}
+	
 	/**
 	 * Afficher dans le canvas l'état actuel du jeu
 	 * @private
 	 * @method
 	 */
 	_updateCanvasDisplay = ()=>{
-		// Police d'écriture
+		// Police d'écriture des cases
 		this.ctx.textAlign    = "center";
 		this.ctx.textBaseline = "middle"
 		this.ctx.font         = `bold 30px \"Roboto Mono\"`;
 		
 		// Fond de l'affichage
 		this.ctx.fillStyle = "#ffffff";
-		this.ctx.fillRect(0, 0, this.gameWidth, this.gameHeight);
+		this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 		
 		// Affichage des cases
-		this.eachCase((c, gx, gy)=>{
+		this.eachCase((c, gamePos)=>{
 			
 			// Obtenir la position de grille et la position animée
-			const gamePos = new Position(gx, gy);
 			let dispPos = gamePos;
 			if (c.animations.position !== null){
 				dispPos = c.animations.position.currentValue; 
@@ -510,8 +529,8 @@ export class Game extends EventTarget{
 			);
 			
 			// Texte de case
-			this.ctx.fillStyle = '#000000';
 			if (c.value){
+				this.ctx.fillStyle = '#000000';
 				this.ctx.fillText(
 					c.value, 
 					(dispPos.x + 0.5) * this.caseWidth, 
@@ -519,19 +538,37 @@ export class Game extends EventTarget{
 				);
 			}
 		}, this.lastDirection.x, this.lastDirection.y);
+
+		// Affichage de l'indication de pause
+		if (this.isPaused){
+			this.ctx.textAlign    = "left";
+			this.ctx.textBaseline = "middle"
+			this.ctx.font         = `15px \"Roboto Mono\"`;
+			this.ctx.fillStyle    = '#000000';
+			this.ctx.fillText(
+				"EN PAUSE",
+				this.canvas.width * 0.05,
+				this.canvas.height * 0.05
+			)
+		}
 	}
 
 	/**
 	 * Boucle d'affichage chaque image tant que le jeu est en cours.
-	 * @public
+	 * @private
 	 * @method
 	 */
-	displayLoop = ()=>{
+	_displayLoop = ()=>{
 		this._updateCanvasDisplay();
-		if (this.isOngoing){
-			window.requestAnimationFrame(this.displayLoop);
+		// On raffiche si on a pas perdu
+		// Ou si au moins une animation est en cours
+		if (this.isOngoing || !this.hasFinishedAnimations){
+			window.requestAnimationFrame(this._displayLoop);
 		}
 	}
+
+	// -------------------------------------------------------------------------
+	// Events
 
 	/**
 	 * Raccourci pour la méthode addEventListener
@@ -545,25 +582,15 @@ export class Game extends EventTarget{
 	}
 
 	/**
-	 * A exécuter quand une partie commence
+	 * A exécuter quand une partie est terminée
 	 * @private
 	 * @method
 	 */
-	_onStart = ()=>{
-		this.isOngoing = true;
-		this.displayLoop();
-		this.dispatchEvent(new GameStartEvent());
-	}
-
-	/**
-	 * A exécuter quand une partie est perdue
-	 * @private
-	 * @method
-	 */
-	_onLose = ()=>{
+	_onEnd = ()=>{
 		this.isOngoing = false;
-		const score = this.getScore();
-		const max   = this.getMaxCase();
+		this.isPaused = false;
+		const score = this.score;
+		const max   = this.maxCase;
 		const moves = this.moves;
 		this.dispatchEvent(new GameEndEvent(score, max, moves));
 	}

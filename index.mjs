@@ -3,16 +3,16 @@ import { GameResult, GameInfos } from "./informations.mjs";
 import { Game } from "./game.mjs";
 
 // Créer le controlleur de jeu au clavier
-const keys = ["ArrowLeft", "ArrowUp", "ArrowRight","ArrowDown"];
-const ctrl = new KeyboardGameController(...keys);
+const ctrl = new KeyboardGameController();
 
 // Créer l'affichage des informations 
 const infosEl = document.getElementById("stats");
 const infos   = new GameInfos(infosEl);
 
 // Créer le jeu
+const sizeSelect = document.getElementById("gameSizeSelect");
 const canvas   = document.getElementById("display");
-const gameSize = [5,5];
+const gameSize = [parseInt(sizeSelect.value), parseInt(sizeSelect.value)];
 const game     = new Game(...gameSize, canvas, ctrl);
 
 // Ecouter le démarrage de jeu
@@ -27,10 +27,18 @@ game.on("end", (e)=>{
 	// Afficher le score dans l'affichage des informations
 	infos.printLine("Partie terminée", true);
 	infos.printLine(`Case max : ${e.max}`);
+	infos.printLine(`Score : ${e.score}`);
 	infos.printLine(`Moyenne case max : ${infos.results.averageMax}`);
-	// Relancer une partie
-	game.initializeGame();
 });
 
 // Démarrer le jeu
-game.initializeGame();
+game.start();
+
+// Ecouter le choix de taille de grille
+sizeSelect.addEventListener("change", (event)=>{
+	let size = parseInt(event.currentTarget.value);
+	game.isPaused = true;
+	game.columns = size;
+	game.rows = size;
+	game.start();
+});

@@ -27,8 +27,21 @@ export class GameEndEvent extends Event{
 }
 
 /**
- * Evènement TiltEvent
+ * Evènement AfterTiltEvent
  */
+export class AfterTiltEvent extends Event{
+	/**
+	 * @param {boolean} hasChanged true si le plateau a changé, false sinon
+	 */
+	constructor(hasChanged = false){
+		super("aftertilt");
+		this.hasChanged = hasChanged;
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Evenements émis par les controlleurs de jeu
+
 export class TiltEvent extends Event{
 	/**
 	 * @param {Direction} direction 
@@ -39,15 +52,14 @@ export class TiltEvent extends Event{
 	}
 }
 
-/**
- * Evènement AfterTiltEvent
- */
-export class AfterTiltEvent extends Event{
-	/**
-	 * @param {boolean} hasChanged true si le plateau a changé, false sinon
-	 */
-	constructor(hasChanged = false){
-		super("aftertilt");
-		this.hasChanged = hasChanged;
+export class RestartEvent extends Event{
+	constructor(){
+		super("restart");
+	}
+}
+
+export class PauseEvent extends Event{
+	constructor(){
+		super("pause");
 	}
 }
